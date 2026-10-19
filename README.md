@@ -6,7 +6,7 @@ Decision support for insurance underwriters. An applicant uploads a government I
 
 The LLM never makes the decision. Hard-stop rules (age, sanctions, expired ID, failed identity check) run first and are the only thing that can reject an application. The model only writes the rationale.
 
-It was built on AWS: Textract for ID fields, Rekognition for liveness and face match, Lambda for the rules engine, Bedrock AgentCore for the rationale, S3 with a 30-day deletion rule for ID images, and DynamoDB for the audit trail. The free-tier credits that paid for it have run out, so there is no live URL. **Demo mode runs the whole pipeline offline**, with sample applicants in place of Textract and Rekognition output.
+It was built on AWS: Textract for ID fields, Rekognition for liveness and face match, Lambda for the rules engine, Bedrock AgentCore for the rationale, S3 with a 30-day deletion rule for ID images, and DynamoDB for the audit trail. The free-tier credits that paid for it have run out, so there is no live URL. Demo mode runs the whole pipeline offline, with sample applicants in place of Textract and Rekognition output.
 
 ![Demo: a sanctions match caught despite surname-first OCR](docs/demo-sanctions.png)
 
@@ -24,7 +24,7 @@ python -m eval.run_eval  # decision eval
 python -m pytest -q      # 25 tests
 ```
 
-For the UI: `pip install -r requirements.txt`, then `streamlit run app.py`. In demo mode, step 1 has a **Sample applicant** picker that jumps straight to the decision.
+For the UI: `pip install -r requirements.txt`, then `streamlit run app.py`. In demo mode, step 1 has a Sample applicant picker that jumps straight to the decision.
 
 Set `UNDERWRITING_LLM=anthropic` and `ANTHROPIC_API_KEY` to have Claude write the rationale offline. The decision still comes from the rules.
 
@@ -70,15 +70,21 @@ The age rule already compared exact birthdays (an even earlier version subtracte
 
 "Unsafe auto-approvals" means an applicant who should have been rejected or reviewed was approved without a person looking at it. CI fails if that number is above zero.
 
-**Caveats:** most of the earlier unsafe approvals came from the placeholder sanctions check, so the before column says more about missing logic than about tuning. I wrote these cases while fixing the rules, so they work as a regression suite, not an independent benchmark. The sanctions list in `data/sanctions_sample.csv` is fictional. The AWS version screened against the OFAC SDN list.
+Some caveats. Most of the earlier unsafe approvals came from the placeholder sanctions check, so the before column says more about missing logic than about tuning. I wrote these cases while fixing the rules, so they work as a regression suite, not an independent benchmark. The sanctions list in `data/sanctions_sample.csv` is fictional. The AWS version screened against the OFAC SDN list.
 
 ## Design notes
 
-**Rules before the model.** Underwriting decisions have to be explainable to a regulator and repeatable. Putting the decision in deterministic code and giving the model only the explanation keeps both properties, and it means a model outage changes the wording, not the outcome.
+### Rules before the model
 
-**Review over rejection when data is missing.** A rejection is costly and hard to reverse for the applicant. When the pipeline cannot tell, it asks a person.
+Underwriting decisions have to be explainable to a regulator and repeatable. Putting the decision in deterministic code and giving the model only the explanation keeps both properties, and it means a model outage changes the wording, not the outcome.
 
-**Why AgentCore.** Underwriting tools touch PII, so each tool needed tight IAM scoping and persistent traces. AgentCore maps tools to IAM roles and logs traces to CloudWatch without custom orchestration code, which LangChain would have needed for the same guarantees.
+### Review over rejection when data is missing
+
+A rejection is costly and hard to reverse for the applicant. When the pipeline cannot tell, it asks a person.
+
+### Why AgentCore
+
+Underwriting tools touch PII, so each tool needed tight IAM scoping and persistent traces. AgentCore maps tools to IAM roles and logs traces to CloudWatch without custom orchestration code, which LangChain would have needed for the same guarantees.
 
 ## Project layout
 
@@ -95,8 +101,8 @@ tests/          unit tests for parsing, rules, identity gate and eval gate
 
 ## Project history
 
-* **April–May 2026:** built on AWS (Textract, Rekognition, Lambda, Bedrock AgentCore, S3, DynamoDB).
-* **October 2026:** the AWS free-tier credits ran out. I reset the git history to a single commit, then added the offline demo mode, the eval set, the rule fixes above and CI.
+* April–May 2026: built on AWS (Textract, Rekognition, Lambda, Bedrock AgentCore, S3, DynamoDB).
+* October 2026: the AWS free-tier credits ran out. I moved the project to this fresh repository and added the offline demo mode, the eval set, the rule fixes above and CI.
 
 ## License
 
