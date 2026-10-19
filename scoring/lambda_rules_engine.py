@@ -11,11 +11,16 @@ Deployed via AWS Lambda configured with strict IAM boundaries.
 import json
 from typing import Dict, Any
 
+from datetime import date
+
 from scoring.policy_rules import (
     check_age_rule,
     check_document_expiration_rule,
     check_required_fields,
-    check_sanctions_rule,
+    screen_sanctions,
+    extract_state,
+    get_rules,
+    parse_date,
 )
 
 def build_rule_result(rule_id: str, passed: bool, message: str, severity: str, risk_delta: int) -> Dict[str, Any]:
@@ -38,26 +43,38 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
     Returns:
         JSON compatible dictionary with scoring results
     """
-    # Extract payload
+    # Extract payload. "as_of" lets tests and evals pin today's date.
     applicant_data = event.get("applicant_data", {})
-    
+    as_of = parse_date(event.get("as_of", "")) or date.today()
+
     rule_results = []
 
-    # 1. Execute Deterministic Policy Rules
+    # 1. Execute Deterministic Policy Rules.
+    # A rule that cannot run because OCR missed its field is a review item,
+    # not a rejection. Only a rule that ran and failed can hard-stop.
     dob = applicant_data.get("DOB")
-    age_ok, age_msg = check_age_rule(dob)
-    rule_results.append(build_rule_result("AGE_ELIGIBILITY", age_ok, age_msg, "hard_stop", 100))
-    
+    age_ok, age_msg = check_age_rule(dob, today=as_of)
+    age_severity = "hard_stop" if parse_date(dob) else "review"
+    rule_results.append(build_rule_result("AGE_ELIGIBILITY", age_ok, age_msg, age_severity,
+                                          100 if age_severity == "hard_stop" else 35))
+
     first_name = applicant_data.get("FIRST_NAME", "")
     last_name = applicant_data.get("LAST_NAME", "")
-    sanctions_ok, sanctions_msg = check_sanctions_rule(first_name, last_name)
-    rule_results.append(build_rule_result("SANCTIONS_SCREEN", sanctions_ok, sanctions_msg, "hard_stop", 200))
+    sanctions_status, sanctions_msg = screen_sanctions(first_name, last_name)
+    if sanctions_status == "possible":
+        rule_results.append(build_rule_result("SANCTIONS_SCREEN", False, sanctions_msg, "review", 50))
+    else:
+        rule_results.append(build_rule_result("SANCTIONS_SCREEN", sanctions_status == "clear",
+                                              sanctions_msg, "hard_stop", 200))
 
     data_complete, data_msg, missing_fields = check_required_fields(applicant_data)
     rule_results.append(build_rule_result("OCR_COMPLETENESS", data_complete, data_msg, "review", 35))
 
-    expiration_ok, expiration_msg = check_document_expiration_rule(applicant_data.get("EXPIRATION_DATE"))
-    rule_results.append(build_rule_result("DOCUMENT_EXPIRATION", expiration_ok, expiration_msg, "hard_stop", 120))
+    expiration = applicant_data.get("EXPIRATION_DATE")
+    expiration_ok, expiration_msg = check_document_expiration_rule(expiration, today=as_of)
+    expiration_severity = "hard_stop" if parse_date(expiration) else "review"
+    rule_results.append(build_rule_result("DOCUMENT_EXPIRATION", expiration_ok, expiration_msg,
+                                          expiration_severity, 120 if expiration_severity == "hard_stop" else 35))
 
     # 2. Risk Scoring Algorithm
     base_score = 0
@@ -72,28 +89,18 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         flags.append(f"{result['rule_id']}: {result['message']}")
         hard_stop_failed = hard_stop_failed or result["severity"] == "hard_stop"
 
-    # Apply minor penalties based on location (mocked risk logic)
-    address = str(applicant_data.get("ADDRESS", "")).lower()
-    if "florida" in address or "fl" in address.split():
-        # Higher weather-related risk zone
+    # Weather-zone surcharge, based on the parsed state rather than a substring search.
+    state = extract_state(applicant_data)
+    if state in get_rules()["HIGH_RISK_WEATHER_STATES"]:
         base_score += 15
-        flags.append("ZONE_RISK: High-risk geographic area")
+        flags.append(f"ZONE_RISK: {state} is a configured high-risk weather state")
         rule_results.append(build_rule_result(
-            "GEOGRAPHIC_RISK",
-            False,
-            "Address appears to be in a higher-risk weather zone",
-            "review",
-            15
-        ))
+            "GEOGRAPHIC_RISK", False, f"{state} is a configured high-risk weather state", "review", 15))
     else:
         rule_results.append(build_rule_result(
-            "GEOGRAPHIC_RISK",
-            True,
-            "No configured high-risk geographic signal detected",
-            "review",
-            15
-        ))
-        
+            "GEOGRAPHIC_RISK", True,
+            f"No configured geographic risk for {state or 'unknown state'}", "review", 15))
+
     # 3. Decision Routing Logic
     if hard_stop_failed:
         decision = "AUTO_REJECTED"
@@ -122,13 +129,13 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
         "body": json.dumps(result)
     }
 
-def invoke_rules_engine_mock(applicant_data: Dict[str, Any]) -> Dict[str, Any]:
+def invoke_rules_engine_mock(applicant_data: Dict[str, Any], as_of: str = "") -> Dict[str, Any]:
     """
     Mock invocation handler for testing the Lambda function locally
     without deploying to AWS. Used by the Streamlit application.
     """
     # Wrap data in the standard API Gateway event format
-    mock_event = {"applicant_data": applicant_data}
+    mock_event = {"applicant_data": applicant_data, "as_of": as_of}
     
     # Execute the handler directly
     response = lambda_handler(mock_event, None)

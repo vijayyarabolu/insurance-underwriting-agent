@@ -1,0 +1,8 @@
+# Fictional names for offline testing only. The AWS deployment screened
+# against the OFAC SDN list; these entries are invented and match no real person.
+full_name,list,entry_id
+Viktor Orlenko,SAMPLE-SDN,S-0001
+Marisol Quintero-Baez,SAMPLE-SDN,S-0002
+Dariusz Kowalczyk,SAMPLE-SDN,S-0003
+Amara Okonkwo-Lindqvist,SAMPLE-SDN,S-0004
+Jean-Luc Ferrand,SAMPLE-SDN,S-0005
