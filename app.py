@@ -12,7 +12,10 @@ Run with: streamlit run app.py
 """
 
 import streamlit as st
+import json
+import os
 import time
+from pathlib import Path
 import uuid
 
 import config
@@ -28,6 +31,15 @@ from storage.dynamo_handler import DynamoAuditStore
 # =============================================================================
 # Page Configuration
 # =============================================================================
+@st.cache_data
+def _sample_applicants() -> dict:
+    """A handful of profiles from the eval set, for the demo picker."""
+    picks = ["u01", "u07", "u16", "u21", "u27", "u29", "u31"]
+    path = Path(__file__).resolve().parent / "eval" / "applicants.jsonl"
+    rows = {r["id"]: r for r in map(json.loads, path.read_text().splitlines())}
+    return {cid: rows[cid] for cid in picks}
+
+
 st.set_page_config(
     page_title=config.APP_TITLE,
     page_icon="🛡️",
@@ -142,6 +154,19 @@ with col_content:
         st.markdown("### Step 1: Upload Government ID")
         st.write("Please provide a clear scan of the applicant's Driver's License or Passport.")
         
+        if config.DEMO_MODE:
+            st.info("Demo mode: AWS is paused (free-tier credits ran out), so Textract and Rekognition "
+                    "return sample data. Pick a sample applicant to jump straight to the decision.")
+            samples = _sample_applicants()
+            picked = st.selectbox("Sample applicant", list(samples), format_func=lambda k: samples[k]["description"])
+            if st.button("Run sample applicant", type="primary"):
+                st.session_state.parsed_data = samples[picked]["applicant"]
+                st.session_state.liveness = samples[picked]["liveness"]
+                st.session_state.id_document_bytes = b""
+                st.session_state.step = 3
+                st.rerun()
+            st.caption("Or upload any image below to walk through every step.")
+
         uploaded_file = st.file_uploader("Choose an image", type=['png', 'jpg', 'jpeg'])
         
         if uploaded_file and st.button("Extract Data with Amazon Textract", type="primary"):
@@ -335,12 +360,15 @@ with col_content:
                 for action in dec["review_actions"]:
                     st.write(f"- {action}")
             
-            st.markdown("#### LLM Agent Rationale")
+            st.markdown("#### Agent Rationale" + (" (template in demo mode)" if config.DEMO_MODE and not os.getenv("UNDERWRITING_LLM") else ""))
             st.info(dec['rationale'])
 
             with st.expander("Audit Decision Packet"):
                 st.json(st.session_state.underwriting_packet)
             
-            st.success("✅ Complete. Decision recorded securely to AWS DynamoDB Audit Trail.")
+            if config.DEMO_MODE:
+                st.success("✅ Complete. In demo mode the DynamoDB audit write is skipped.")
+            else:
+                st.success("✅ Complete. Decision recorded to the DynamoDB audit trail.")
             
         st.markdown('</div>', unsafe_allow_html=True)
