@@ -101,7 +101,7 @@ tests/          unit tests for parsing, rules, identity gate and eval gate
 
 ## Project history
 
-* April–May 2026: built on AWS (Textract, Rekognition, Lambda, Bedrock AgentCore, S3, DynamoDB).
+* April to May 2026: built on AWS (Textract, Rekognition, Lambda, Bedrock AgentCore, S3, DynamoDB).
 * October 2026: the AWS free-tier credits ran out. I moved the project to this fresh repository and added the offline demo mode, the eval set, the rule fixes above and CI.
 
 ## License

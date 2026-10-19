@@ -1,5 +1,5 @@
 """
-Insurance Underwriting Agent — Streamlit Application.
+Insurance Underwriting Agent: Streamlit application.
 
 A guided stepper interface that orchestrates the entire automated
 underwriting lifecycle using AWS Services:
